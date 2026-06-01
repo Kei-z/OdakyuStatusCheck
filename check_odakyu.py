@@ -117,17 +117,19 @@ def main():
         print("Test notification sent.")
         return
 
+    # 平常・異常にかかわらず毎回通知する。
+    body = top_msg if top_msg else "運行状況を取得しました。"
     if is_abnormal:
-        # LINEに送るのは「状況メッセージ」だけに絞る
-        body = top_msg if top_msg else "運行情報に変化があります。"
-        notify_line(
-            "🚃 小田急に運行情報あり（遅延・運休などの可能性）。\n"
-            f"{body}\n"
-            f"{STATUS_URL}"
-        )
-        print("Abnormal: notified.")
+        head = "🚃⚠️ 小田急に運行情報あり（遅延・運休などの可能性）"
     else:
-        print("Normal: no notification.")
+        head = "🚃✅ 小田急は平常運転です"
+
+    notify_line(
+        f"{head}\n"
+        f"{body}\n"
+        f"{STATUS_URL}"
+    )
+    print(f"Notified. abnormal={is_abnormal}")
 
 
 if __name__ == "__main__":
