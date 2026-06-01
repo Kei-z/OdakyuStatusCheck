@@ -4,29 +4,30 @@
 取得方法: Playwright(headless Chromium) で
          https://traininfo.odakyu-rt.jp/train_status を開き、
          JavaScript描画後のテキストを読んで判定する。
-日本語・英語どちらの表示でも判定できるようにしている。
+日本語表示・英語表示(WOVN)どちらでも判定できるようにする。
 """
 
 import os
+import re
 import sys
 from playwright.sync_api import sync_playwright
 
 STATUS_URL = "https://traininfo.odakyu-rt.jp/train_status"
 
-# 画面上部の総合メッセージが「平常」を示す表現（日英）。
-NORMAL_TOP_KEYWORDS = [
-    "平常どおり運転",          # 日本語
-    "operating normally",     # 英語: It's operating normally.
+# 画面上部の総合メッセージが「平常」を示す語（日本語/英語）。
+# どれかが含まれていれば平常運転とみなす。
+NORMAL_TOP = [
+    "平常どおり運転",
+    "It's operating normally",
+    "operating normally",
+    "operating as normal",
 ]
 
-# 異常を示す代表語（日英）。1つでも出ていれば異常とみなす。
+# 異常を示す代表語（日本語/英語）。出ていれば通知する。
 ABNORMAL_HINTS = [
-    # 日本語
     "見合わせ", "遅延", "遅れ", "運休", "ダイヤが乱れ", "直通運転を中止",
     "各駅停車のみ", "運転区間を変更",
-    # 英語
-    "suspended", "delay", "delayed", "Canceled direct", "altered schedule",
-    "Local trains only",
+    "suspended", "delay", "delayed", "altered schedule", "canceled",
 ]
 
 
@@ -47,15 +48,19 @@ def fetch_text():
     return text
 
 
+def extract_top_message(text: str) -> str:
+    """画面上部の『YYYY/MM/DD HH:MM ...』の行を1行抜き出す（通知用）。"""
+    for line in text.splitlines():
+        line = line.strip()
+        if re.match(r"^\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}", line):
+            return line
+    return ""
+
+
 def judge(text: str):
     """(異常か, マッチ情報) を返す。"""
-    lower = text.lower()
-    top_normal = any(
-        (kw.lower() in lower) for kw in NORMAL_TOP_KEYWORDS
-    )
-    abnormal_hits = [w for w in ABNORMAL_HINTS if w.lower() in lower]
-
-    # トップが平常表示で、異常語がなければ平常。
+    top_normal = any(k in text for k in NORMAL_TOP)
+    abnormal_hits = [w for w in ABNORMAL_HINTS if w in text]
     is_abnormal = (not top_normal) or bool(abnormal_hits)
     return is_abnormal, {"top_normal": top_normal, "abnormal_hits": abnormal_hits}
 
@@ -71,6 +76,7 @@ def notify_line(message: str):
         json={"to": user_id, "messages": [{"type": "text", "text": message}]},
         timeout=15,
     )
+    print(f"[DEBUG] LINE push status: {resp.status_code} / {resp.text[:200]}")
     resp.raise_for_status()
 
 
@@ -85,10 +91,17 @@ def main():
         sys.exit(0)
 
     is_abnormal, info = judge(text)
+    top_msg = extract_top_message(text)
 
-    # 簡潔なデバッグ出力（Actionsログ用。LINEには送らない）
+    # --- デバッグ出力（GitHub Actions ログ用。詳細はここだけ） ---
+    print("=" * 60)
+    print(f"[DEBUG] URL : {STATUS_URL}")
+    print(f"[DEBUG] body length : {len(text)} chars")
     print(f"[DEBUG] judge info  : {info}")
     print(f"[DEBUG] is_abnormal : {is_abnormal}")
+    print(f"[DEBUG] top message : {top_msg}")
+    print("=" * 60)
+    # --------------------------------------------------------
 
     if test_notify:
         notify_line("✅ テスト通知です。LINE連携は正常に動いています。")
@@ -96,12 +109,12 @@ def main():
         return
 
     if is_abnormal:
-        snippet = text[:300]
+        # LINEに送るのは「状況メッセージ」だけに絞る
+        body = top_msg if top_msg else "運行情報に変化があります。"
         notify_line(
             "🚃 小田急に運行情報あり（遅延・運休などの可能性）。\n"
-            "出発前に確認してください。\n"
-            f"{STATUS_URL}\n\n"
-            f"---\n{snippet}"
+            f"{body}\n"
+            f"{STATUS_URL}"
         )
         print("Abnormal: notified.")
     else:
