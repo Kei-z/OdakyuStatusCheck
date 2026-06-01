@@ -1,0 +1,29 @@
+name: odakyu-status-check
+
+on:
+  schedule:
+    # cron は UTC。平日(月〜金) 日本時間 6:50 = UTC 前日 21:50。
+    # 月〜金の朝に対応させるため UTC では日〜木の 21:50 を指定。
+    - cron: "50 21 * * 0-4"
+  workflow_dispatch: {}  # 手動実行もできるようにしておく（テスト用）
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run checker
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: python check_odakyu.py
