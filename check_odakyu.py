@@ -58,10 +58,19 @@ def extract_top_message(text: str) -> str:
 
 
 def judge(text: str):
-    """(異常か, マッチ情報) を返す。"""
+    """(異常か, マッチ情報) を返す。
+
+    判定方針：
+    - 上部の総合メッセージ(top_normal)が「平常」を示していれば平常とみなす。
+      これは小田急が状況に応じて出し分ける総合判定なので最も信頼できる。
+    - 本文全体の異常語チェックは、固定リンク（例: "Proof of delay" 遅延証明書）や
+      注意書き（"10分以上の遅れが…"）に常時ヒットして誤検知するため、
+      主判定には使わない。top_normal が偽のときの参考情報としてのみ拾う。
+    """
     top_normal = any(k in text for k in NORMAL_TOP)
+    # 参考情報（通知文の補強用）。主判定には使わない。
     abnormal_hits = [w for w in ABNORMAL_HINTS if w in text]
-    is_abnormal = (not top_normal) or bool(abnormal_hits)
+    is_abnormal = not top_normal
     return is_abnormal, {"top_normal": top_normal, "abnormal_hits": abnormal_hits}
 
 
