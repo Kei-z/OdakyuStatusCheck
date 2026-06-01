@@ -1,34 +1,46 @@
 #!/usr/bin/env python3
 """
 小田急の運行情報をチェックし、平常運転でない場合のみ LINE に通知する。
-GitHub Actions の cron から平日朝に起動される想定。
+（デバッグ版：取得内容と判定結果を毎回ログに出力する）
 """
 
 import os
 import sys
 import requests
 
-# 小田急の運行情報ページ（公式）。仕様変更があれば URL / 抽出ロジックの調整が必要。
 ODAKYU_STATUS_URL = "https://www.odakyu.jp/cgi/json/unkou_info.json"
-
-# 平常運転を示すと思われるキーワード。実際のレスポンスを見て調整する。
 NORMAL_KEYWORDS = ["平常", "通常", "現在、事故", "情報はありません"]
 
 
 def fetch_status():
-    """運行情報を取得して (異常かどうか, 本文) を返す。"""
     headers = {"User-Agent": "Mozilla/5.0 (odakyu-status-checker)"}
     resp = requests.get(ODAKYU_STATUS_URL, headers=headers, timeout=15)
+
+    # --- デバッグ出力 ---
+    print("=" * 60)
+    print(f"[DEBUG] URL          : {ODAKYU_STATUS_URL}")
+    print(f"[DEBUG] HTTP status  : {resp.status_code}")
+    print(f"[DEBUG] Content-Type : {resp.headers.get('Content-Type')}")
+    print(f"[DEBUG] Body length  : {len(resp.text)} chars")
+    print("[DEBUG] Body (first 1000 chars):")
+    print(resp.text[:1000])
+    print("=" * 60)
+    # -------------------
+
     resp.raise_for_status()
 
-    # JSON でない / 構造が違う場合に備えてテキストとしても扱える形にする
     try:
         data = resp.json()
         text = str(data)
     except ValueError:
         text = resp.text
 
-    is_abnormal = not any(kw in text for kw in NORMAL_KEYWORDS)
+    matched = [kw for kw in NORMAL_KEYWORDS if kw in text]
+    is_abnormal = len(matched) == 0
+
+    print(f"[DEBUG] Matched normal keywords: {matched}")
+    print(f"[DEBUG] Judged abnormal? : {is_abnormal}")
+
     return is_abnormal, text
 
 
@@ -42,25 +54,30 @@ def notify_line(message: str):
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
-        json={
-            "to": user_id,
-            "messages": [{"type": "text", "text": message}],
-        },
+        json={"to": user_id, "messages": [{"type": "text", "text": message}]},
         timeout=15,
     )
+    print(f"[DEBUG] LINE push status: {resp.status_code} / {resp.text[:200]}")
     resp.raise_for_status()
 
 
 def main():
+    # テスト通知用フラグ。環境変数 TEST_NOTIFY=1 を付けると必ず1通送る。
+    test_notify = os.environ.get("TEST_NOTIFY") == "1"
+
     try:
         is_abnormal, text = fetch_status()
     except Exception as e:
-        # 取得に失敗したら、念のため通知（チェックできない＝自分で確認すべき）
+        print(f"[ERROR] fetch failed: {e}")
         notify_line(f"⚠️ 小田急の運行情報を取得できませんでした。手動で確認してください。\n({e})")
         sys.exit(0)
 
+    if test_notify:
+        notify_line("✅ テスト通知です。LINE連携は正常に動いています。")
+        print("Test notification sent.")
+        return
+
     if is_abnormal:
-        # 必要なら text を整形して載せる。長すぎる場合は切り詰め。
         snippet = text[:300]
         notify_line(
             "🚃 小田急に運行情報あり（遅延・運休の可能性）。\n"
@@ -70,7 +87,6 @@ def main():
         )
         print("Abnormal: notified.")
     else:
-        # 平常運転なら何もしない（通知で邪魔しない）
         print("Normal: no notification.")
 
 
