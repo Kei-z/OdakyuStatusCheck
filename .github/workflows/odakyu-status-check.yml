@@ -4,7 +4,7 @@ on:
   schedule:
     # cron は UTC。日本時間 8:30 = UTC 前日 23:30。
     # 平日(月〜金)の朝に対応させるため、UTC では日〜木(0-4)の 23:30 を指定。
-    - cron: "30 23 * * 0-4"
+    - cron: "0 21 * * 0-4"
   workflow_dispatch: {}  # 手動実行用（テスト）
 
 jobs:
